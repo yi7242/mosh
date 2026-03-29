@@ -36,8 +36,12 @@
 #include <memory>
 #include <string>
 
+#ifdef _WIN32
+#include "src/include/windows_compat.h"
+#else
 #include <sys/ioctl.h>
 #include <termios.h>
+#endif
 
 #include "src/frontend/terminaloverlay.h"
 #include "src/network/networktransport.h"
@@ -57,9 +61,18 @@ private:
   bool escape_requires_lf;
   std::wstring escape_key_help;
 
+#ifdef _WIN32
+  /* Windows Console API terminal state */
+  HANDLE h_stdin;
+  HANDLE h_stdout;
+  DWORD saved_input_mode;   /* original stdin console mode */
+  DWORD saved_output_mode;  /* original stdout console mode */
+  short window_rows;        /* current console window rows */
+  short window_cols;        /* current console window columns */
+#else
   struct termios saved_termios, raw_termios;
-
   struct winsize window_size;
+#endif
 
   Terminal::Framebuffer local_framebuffer, new_state;
   Overlay::OverlayManager overlays;
@@ -97,7 +110,14 @@ public:
              const char* predict_overwrite )
     : ip( s_ip ? s_ip : "" ), port( s_port ? s_port : "" ), key( s_key ? s_key : "" ), escape_key( 0x1E ),
       escape_pass_key( '^' ), escape_pass_key2( '^' ), escape_requires_lf( false ), escape_key_help( L"?" ),
-      saved_termios(), raw_termios(), window_size(), local_framebuffer( 1, 1 ), new_state( 1, 1 ), overlays(),
+#ifdef _WIN32
+      h_stdin( INVALID_HANDLE_VALUE ), h_stdout( INVALID_HANDLE_VALUE ),
+      saved_input_mode( 0 ), saved_output_mode( 0 ),
+      window_rows( 24 ), window_cols( 80 ),
+#else
+      saved_termios(), raw_termios(), window_size(),
+#endif
+      local_framebuffer( 1, 1 ), new_state( 1, 1 ), overlays(),
       network(), display( true ) /* use TERM environment var to initialize display */, connecting_notification(),
       repaint_requested( false ), lf_entered( false ), quit_sequence_started( false ), clean_shutdown( false ),
       verbose( s_verbose )

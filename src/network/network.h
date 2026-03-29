@@ -42,8 +42,12 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include "src/include/windows_compat.h"
+#else
 #include <netinet/in.h>
 #include <sys/socket.h>
+#endif
 
 #include "src/crypto/crypto.h"
 

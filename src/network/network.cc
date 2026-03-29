@@ -32,10 +32,9 @@
 
 #include "src/include/config.h"
 
-#include <cassert>
-#include <cerrno>
-#include <cstring>
-
+#ifdef _WIN32
+#include "src/include/windows_compat.h"
+#else
 #include <sys/socket.h>
 #include <sys/types.h>
 #ifdef HAVE_SYS_UIO_H
@@ -44,6 +43,11 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#endif /* _WIN32 */
+
+#include <cassert>
+#include <cerrno>
+#include <cstring>
 
 #include "src/crypto/byteorder.h"
 #include "src/crypto/crypto.h"
@@ -54,7 +58,13 @@
 #include "src/util/timestamp.h"
 
 #ifndef MSG_DONTWAIT
+#ifdef _WIN32
+/* Winsock does not have MSG_DONTWAIT; use non-blocking sockets instead.
+   The flag value 0 is a safe no-op placeholder. */
+#define MSG_DONTWAIT 0
+#else
 #define MSG_DONTWAIT MSG_NONBLOCK
+#endif
 #endif
 
 #ifndef AI_NUMERICSERV
@@ -150,8 +160,22 @@ void Connection::prune_sockets( void )
 Connection::Socket::Socket( int family ) : _fd( socket( family, SOCK_DGRAM, 0 ) )
 {
   if ( _fd < 0 ) {
+#ifdef _WIN32
+    wsa_set_errno();
+#endif
     throw NetworkException( "socket", errno );
   }
+
+#ifdef _WIN32
+  /* On Windows, MSG_DONTWAIT is not available.  Instead put the socket
+     in non-blocking mode so that send/recv return immediately if the
+     operation would block. */
+  u_long nonblocking = 1;
+  if ( ioctlsocket( static_cast<SOCKET>( _fd ), FIONBIO, &nonblocking ) != 0 ) {
+    wsa_set_errno();
+    throw NetworkException( "ioctlsocket FIONBIO", errno );
+  }
+#endif
 
   /* Disable path MTU discovery */
 #ifdef HAVE_IP_MTU_DISCOVER
@@ -233,6 +257,11 @@ Connection::Connection( const char* desired_ip, const char* desired_port ) /* se
     expected_receiver_seq( 0 ), last_heard( -1 ), last_port_choice( -1 ), last_roundtrip_success( -1 ),
     RTT_hit( false ), SRTT( 1000 ), RTTVAR( 500 ), send_error()
 {
+#ifdef _WIN32
+  if ( !winsock_init() ) {
+    throw NetworkException( "WSAStartup failed", errno );
+  }
+#endif
   setup();
 
   /* The mosh wrapper always gives an IP request, in order
@@ -344,6 +373,11 @@ Connection::Connection( const char* key_str, const char* ip, const char* port ) 
     saved_timestamp_received_at( 0 ), expected_receiver_seq( 0 ), last_heard( -1 ), last_port_choice( -1 ),
     last_roundtrip_success( -1 ), RTT_hit( false ), SRTT( 1000 ), RTTVAR( 500 ), send_error()
 {
+#ifdef _WIN32
+  if ( !winsock_init() ) {
+    throw NetworkException( "WSAStartup failed", errno );
+  }
+#endif
   setup();
 
   /* associate socket with remote host and port */
@@ -423,32 +457,45 @@ std::string Connection::recv( void )
 
 std::string Connection::recv_one( int sock_to_recv )
 {
-  /* receive source address, ECN, and payload in msghdr structure */
+  char msg_payload[Session::RECEIVE_MTU];
+  bool congestion_experienced = false;
   Addr packet_remote_addr;
+  socklen_t addrlen = sizeof( packet_remote_addr );
+  ssize_t received_len;
+
+#ifdef _WIN32
+  /* Windows: recvmsg() / struct msghdr are not available in Winsock2.
+     Use recvfrom() instead; ECN ancillary data is not supported. */
+  received_len = recvfrom( sock_to_recv,
+                           msg_payload,
+                           sizeof msg_payload,
+                           0 /* flags; socket is already non-blocking */,
+                           &packet_remote_addr.sa,
+                           &addrlen );
+  if ( received_len < 0 ) {
+    wsa_set_errno();
+    throw NetworkException( "recvfrom", errno );
+  }
+#else
+  /* POSIX: use recvmsg() to also capture ECN ancillary data */
   struct msghdr header;
   struct iovec msg_iovec;
-
-  char msg_payload[Session::RECEIVE_MTU];
   char msg_control[Session::RECEIVE_MTU];
 
-  /* receive source address */
   header.msg_name = &packet_remote_addr;
   header.msg_namelen = sizeof packet_remote_addr;
 
-  /* receive payload */
   msg_iovec.iov_base = msg_payload;
   msg_iovec.iov_len = sizeof msg_payload;
   header.msg_iov = &msg_iovec;
   header.msg_iovlen = 1;
 
-  /* receive explicit congestion notification */
   header.msg_control = msg_control;
   header.msg_controllen = sizeof msg_control;
 
-  /* receive flags */
   header.msg_flags = 0;
 
-  ssize_t received_len = recvmsg( sock_to_recv, &header, MSG_DONTWAIT );
+  received_len = recvmsg( sock_to_recv, &header, MSG_DONTWAIT );
 
   if ( received_len < 0 ) {
     throw NetworkException( "recvmsg", errno );
@@ -458,9 +505,6 @@ std::string Connection::recv_one( int sock_to_recv )
     throw NetworkException( "Received oversize datagram", errno );
   }
 
-  /* receive ECN */
-  bool congestion_experienced = false;
-
   struct cmsghdr* ecn_hdr = CMSG_FIRSTHDR( &header );
   if ( ecn_hdr && ecn_hdr->cmsg_level == IPPROTO_IP
        && ( ecn_hdr->cmsg_type == IP_TOS
@@ -468,12 +512,14 @@ std::string Connection::recv_one( int sock_to_recv )
             || ecn_hdr->cmsg_type == IP_RECVTOS
 #endif
             ) ) {
-    /* got one */
     uint8_t* ecn_octet_p = (uint8_t*)CMSG_DATA( ecn_hdr );
     assert( ecn_octet_p );
 
     congestion_experienced = ( *ecn_octet_p & 0x03 ) == 0x03;
   }
+
+  addrlen = header.msg_namelen;
+#endif /* _WIN32 */
 
   Packet p( session.decrypt( msg_payload, received_len ) );
 
@@ -524,10 +570,9 @@ std::string Connection::recv_one( int sock_to_recv )
   last_heard = timestamp();
 
   if ( server && /* only client can roam */
-       ( remote_addr_len != header.msg_namelen
-         || memcmp( &remote_addr, &packet_remote_addr, remote_addr_len ) != 0 ) ) {
+       ( remote_addr_len != addrlen || memcmp( &remote_addr, &packet_remote_addr, remote_addr_len ) != 0 ) ) {
     remote_addr = packet_remote_addr;
-    remote_addr_len = header.msg_namelen;
+    remote_addr_len = addrlen;
     char host[NI_MAXHOST], serv[NI_MAXSERV];
     int errcode = getnameinfo( &remote_addr.sa,
                                remote_addr_len,
@@ -602,23 +647,64 @@ uint64_t Connection::timeout( void ) const
 
 Connection::Socket::~Socket()
 {
+#ifdef _WIN32
+  fatal_assert( closesocket( static_cast<SOCKET>( _fd ) ) == 0 );
+#else
   fatal_assert( close( _fd ) == 0 );
+#endif
 }
 
-Connection::Socket::Socket( const Socket& other ) : _fd( dup( other._fd ) )
+Connection::Socket::Socket( const Socket& other )
+#ifdef _WIN32
+  : _fd( -1 )
+{
+  /* Duplicate the Winsock socket handle */
+  WSAPROTOCOL_INFOW proto_info;
+  if ( WSADuplicateSocketW( static_cast<SOCKET>( other._fd ), GetCurrentProcessId(), &proto_info ) != 0 ) {
+    wsa_set_errno();
+    throw NetworkException( "WSADuplicateSocket", errno );
+  }
+  SOCKET new_sock = WSASocketW( AF_UNSPEC, SOCK_DGRAM, 0, &proto_info, 0, WSA_FLAG_OVERLAPPED );
+  if ( new_sock == INVALID_SOCKET ) {
+    wsa_set_errno();
+    throw NetworkException( "WSASocket (dup)", errno );
+  }
+  _fd = static_cast<int>( new_sock );
+}
+#else
+  : _fd( dup( other._fd ) )
 {
   if ( _fd < 0 ) {
     throw NetworkException( "socket", errno );
   }
 }
+#endif
 
 Connection::Socket& Connection::Socket::operator=( const Socket& other )
 {
+#ifdef _WIN32
+  if ( this != &other ) {
+    closesocket( static_cast<SOCKET>( _fd ) );
+    WSAPROTOCOL_INFOW proto_info;
+    if ( WSADuplicateSocketW( static_cast<SOCKET>( other._fd ), GetCurrentProcessId(), &proto_info ) != 0 ) {
+      wsa_set_errno();
+      throw NetworkException( "WSADuplicateSocket", errno );
+    }
+    SOCKET new_sock = WSASocketW( AF_UNSPEC, SOCK_DGRAM, 0, &proto_info, 0, WSA_FLAG_OVERLAPPED );
+    if ( new_sock == INVALID_SOCKET ) {
+      wsa_set_errno();
+      throw NetworkException( "WSASocket (dup)", errno );
+    }
+    _fd = static_cast<int>( new_sock );
+  }
+  return *this;
+#else
   if ( dup2( other._fd, _fd ) < 0 ) {
     throw NetworkException( "socket", errno );
   }
 
   return *this;
+#endif
 }
 
 bool Connection::parse_portrange( const char* desired_port, int& desired_port_low, int& desired_port_high )

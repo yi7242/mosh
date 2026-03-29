@@ -33,6 +33,12 @@
 #ifndef SWRITE_HPP
 #define SWRITE_HPP
 
+#ifdef _WIN32
+#include "src/include/windows_compat.h"
+#else
+#include <sys/types.h>
+#endif
+
 int swrite( int fd, const char* str, ssize_t len = -1 );
 
 #endif

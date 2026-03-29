@@ -35,13 +35,226 @@
 
 #include <cassert>
 #include <cerrno>
-#include <csignal>
 #include <cstring>
 
+#ifdef _WIN32
+#include "src/include/windows_compat.h"
+#else
+#include <csignal>
 #include <sys/select.h>
+#endif
 
 #include "src/util/fatal_assert.h"
 #include "src/util/timestamp.h"
+
+#ifdef _WIN32
+
+/*
+ * Windows implementation of the Select class.
+ *
+ * Replaces POSIX pselect()/sigprocmask()/sigaction() with:
+ *   - WSAPoll() for UDP socket readability
+ *   - WaitForSingleObject(h_stdin) for console input availability
+ *   - SetConsoleCtrlHandler() for Ctrl-C / close events (→ SIGINT / SIGTERM)
+ *
+ * SIGWINCH (terminal resize) is detected by polling the console size in
+ * each pass through the main event loop.
+ */
+class Select
+{
+public:
+  static Select& get_instance( void )
+  {
+    static Select instance;
+    return instance;
+  }
+
+private:
+  Select()
+    : sockets(), has_stdin( false ), stdin_ready( false ), consecutive_polls( 0 )
+  {
+    memset( got_signal, 0, sizeof( got_signal ) );
+    register_ctrl_handler();
+  }
+
+  /* not implemented */
+  Select( const Select& );
+  Select& operator=( const Select& );
+
+  static const int MAX_SIGNAL_NUMBER = 64;
+  static const int MAX_POLLS = 10;
+  static const int MAX_SOCKETS = 64;
+
+  /* sockets added via add_fd() */
+  int sockets[MAX_SOCKETS];
+  int num_sockets = 0;
+
+  bool has_stdin;
+  bool stdin_ready;
+  bool socket_ready[MAX_SOCKETS];
+
+  volatile long got_signal[MAX_SIGNAL_NUMBER + 1];
+
+  int consecutive_polls;
+  static unsigned int verbose;
+
+  void register_ctrl_handler( void )
+  {
+    static bool registered = false;
+    if ( !registered ) {
+      SetConsoleCtrlHandler( ctrl_handler, TRUE );
+      registered = true;
+    }
+  }
+
+  static BOOL WINAPI ctrl_handler( DWORD ctrl_type )
+  {
+    Select& sel = get_instance();
+    switch ( ctrl_type ) {
+      case CTRL_C_EVENT:
+      case CTRL_BREAK_EVENT:
+        InterlockedExchange( &sel.got_signal[SIGINT], 1 );
+        return TRUE;
+      case CTRL_CLOSE_EVENT:
+      case CTRL_LOGOFF_EVENT:
+      case CTRL_SHUTDOWN_EVENT:
+        InterlockedExchange( &sel.got_signal[SIGTERM], 1 );
+        return TRUE;
+    }
+    return FALSE;
+  }
+
+public:
+  void add_fd( int fd )
+  {
+    if ( fd == STDIN_FILENO ) {
+      has_stdin = true;
+    } else {
+      if ( num_sockets < MAX_SOCKETS ) {
+        sockets[num_sockets++] = fd;
+      }
+    }
+  }
+
+  void clear_fds( void )
+  {
+    has_stdin = false;
+    stdin_ready = false;
+    num_sockets = 0;
+    memset( socket_ready, 0, sizeof( socket_ready ) );
+  }
+
+  static void add_signal( int signum )
+  {
+    /* Signals are handled via SetConsoleCtrlHandler on Windows.
+       The handler is already registered in the constructor. */
+    (void)signum;
+  }
+
+  /* timeout unit: milliseconds; negative means wait forever */
+  int select( int timeout )
+  {
+    stdin_ready = false;
+    memset( socket_ready, 0, sizeof( socket_ready ) );
+
+    /* Rate-limit polls (same logic as POSIX version). */
+    if ( verbose > 1 && timeout == 0 ) {
+      fprintf( stderr, "%s: got poll (timeout 0)\n", __func__ );
+    }
+    if ( timeout == 0 && ++consecutive_polls >= MAX_POLLS ) {
+      if ( verbose > 1 && consecutive_polls == MAX_POLLS ) {
+        fprintf( stderr, "%s: got %d polls, rate limiting.\n", __func__, MAX_POLLS );
+      }
+      timeout = 1;
+    } else if ( timeout != 0 && consecutive_polls ) {
+      if ( verbose > 1 && consecutive_polls >= MAX_POLLS ) {
+        fprintf( stderr, "%s: got %d consecutive polls\n", __func__, consecutive_polls );
+      }
+      consecutive_polls = 0;
+    }
+
+    /* Build WSAPoll descriptor array for tracked sockets. */
+    WSAPOLLFD pfds[MAX_SOCKETS];
+    for ( int i = 0; i < num_sockets; i++ ) {
+      pfds[i].fd = static_cast<SOCKET>( sockets[i] );
+      pfds[i].events = POLLRDNORM;
+      pfds[i].revents = 0;
+    }
+
+    HANDLE h_stdin = has_stdin ? GetStdHandle( STD_INPUT_HANDLE ) : INVALID_HANDLE_VALUE;
+
+    int socket_events = 0;
+
+    if ( num_sockets > 0 ) {
+      /* Use WSAPoll for sockets with the requested timeout. */
+      socket_events = WSAPoll( pfds, static_cast<ULONG>( num_sockets ), timeout );
+      if ( socket_events > 0 ) {
+        for ( int i = 0; i < num_sockets; i++ ) {
+          if ( pfds[i].revents & ( POLLRDNORM | POLLERR | POLLHUP ) ) {
+            socket_ready[i] = true;
+          }
+        }
+      } else if ( socket_events < 0 ) {
+        socket_events = 0;
+      }
+      /* After WSAPoll returns, do a non-blocking check on stdin. */
+      if ( has_stdin ) {
+        if ( WaitForSingleObject( h_stdin, 0 ) == WAIT_OBJECT_0 ) {
+          stdin_ready = true;
+        }
+      }
+    } else if ( has_stdin ) {
+      /* Only waiting for stdin. */
+      DWORD wait_ms = ( timeout < 0 ) ? INFINITE : static_cast<DWORD>( timeout );
+      if ( WaitForSingleObject( h_stdin, wait_ms ) == WAIT_OBJECT_0 ) {
+        stdin_ready = true;
+      }
+    } else if ( timeout > 0 ) {
+      Sleep( static_cast<DWORD>( timeout ) );
+    }
+
+    freeze_timestamp();
+
+    return socket_events + ( stdin_ready ? 1 : 0 );
+  }
+
+  bool read( int fd )
+  {
+    if ( fd == STDIN_FILENO ) {
+      return stdin_ready;
+    }
+    for ( int i = 0; i < num_sockets; i++ ) {
+      if ( sockets[i] == fd ) {
+        return socket_ready[i];
+      }
+    }
+    return false;
+  }
+
+  /* This method consumes a signal notification. */
+  bool signal( int signum )
+  {
+    if ( signum < 0 || signum > MAX_SIGNAL_NUMBER ) {
+      return false;
+    }
+    return InterlockedExchange( &got_signal[signum], 0 ) != 0;
+  }
+
+  /* This method does not consume signal notifications. */
+  bool any_signal( void ) const
+  {
+    for ( int i = 0; i <= MAX_SIGNAL_NUMBER; i++ ) {
+      if ( got_signal[i] ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static void set_verbose( unsigned int s_verbose ) { verbose = s_verbose; }
+};
+
+#else /* !_WIN32 — original POSIX implementation */
 
 /* Convenience wrapper for pselect(2).
 
@@ -243,4 +456,6 @@ private:
   static unsigned int verbose;
 };
 
-#endif
+#endif /* _WIN32 */
+
+#endif /* SELECT_HPP */

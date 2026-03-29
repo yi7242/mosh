@@ -39,9 +39,13 @@
 #include <cstring>
 #include <string>
 
+#ifdef _WIN32
+#include "src/include/windows_compat.h"
+#else
 #if HAVE_LANGINFO_H
 #include <langinfo.h>
 #endif
+#endif /* _WIN32 */
 
 #include "src/util/locale_utils.h"
 
@@ -68,6 +72,25 @@ const LocaleVar get_ctype( void )
 
 const char* locale_charset( void )
 {
+#ifdef _WIN32
+  /* On Windows, check the active console output code page.
+     We enforce UTF-8 (code page 65001) at startup via
+     windows_set_utf8_codepage(), so this should always return UTF-8. */
+  static const char utf8_name[] = "UTF-8";
+  static const char ascii_name[] = "US-ASCII";
+
+  UINT cp = GetConsoleOutputCP();
+  if ( cp == 65001 ) {
+    return utf8_name;
+  }
+  /* Code page 20127 is US-ASCII */
+  if ( cp == 20127 ) {
+    return ascii_name;
+  }
+  static char cp_name[16];
+  snprintf( cp_name, sizeof cp_name, "CP%u", cp );
+  return cp_name;
+#else
   static const char ASCII_name[] = "US-ASCII";
 
   /* Produce more pleasant name of US-ASCII */
@@ -78,6 +101,7 @@ const char* locale_charset( void )
   }
 
   return ret;
+#endif /* _WIN32 */
 }
 
 bool is_utf8_locale( void )
@@ -91,6 +115,13 @@ bool is_utf8_locale( void )
 
 void set_native_locale( void )
 {
+#ifdef _WIN32
+  /* On Windows, set both console code pages to UTF-8 so that the
+     narrow-character locale_charset() check passes.  Also call
+     setlocale() so that C library string functions work with UTF-8. */
+  windows_set_utf8_codepage();
+  setlocale( LC_ALL, ".UTF-8" );
+#else
   /* Adopt native locale */
   if ( NULL == setlocale( LC_ALL, "" ) ) {
     int saved_errno = errno;
@@ -105,10 +136,12 @@ void set_native_locale( void )
       perror( "setlocale" );
     }
   }
+#endif /* _WIN32 */
 }
 
 void clear_locale_variables( void )
 {
+#ifndef _WIN32
   unsetenv( "LANG" );
   unsetenv( "LANGUAGE" );
   unsetenv( "LC_CTYPE" );
@@ -124,4 +157,9 @@ void clear_locale_variables( void )
   unsetenv( "LC_MEASUREMENT" );
   unsetenv( "LC_IDENTIFICATION" );
   unsetenv( "LC_ALL" );
+#else
+  /* On Windows, environment variable manipulation happens differently.
+     The server (which calls this function) does not run on Windows;
+     provide a no-op stub. */
+#endif /* _WIN32 */
 }

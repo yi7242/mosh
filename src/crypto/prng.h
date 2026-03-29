@@ -35,16 +35,25 @@
 
 #include "config.h"
 
+#ifdef _WIN32
+/* On Windows we always use BCryptGenRandom — no /dev/urandom needed. */
+#include "src/include/windows_compat.h"
+#define HAVE_BCRYPTGENRANDOM 1
+#undef HAVE_URANDOM
+#else
 #if !defined( HAVE_GETENTROPY ) && !defined( HAVE_GETRANDOM )
 #define HAVE_URANDOM 1
 #else
 #undef HAVE_URANDOM
 #endif
+#endif /* _WIN32 */
 
+#ifndef _WIN32
 #include <unistd.h>
 #ifdef HAVE_SYS_RANDOM_H
 #include <sys/random.h>
 #endif
+#endif /* !_WIN32 */
 
 #include <algorithm>
 #include <cstdint>
@@ -87,7 +96,15 @@ public:
       return;
     }
 
-#if defined( HAVE_GETRANDOM )
+#if defined( HAVE_BCRYPTGENRANDOM )
+    /* Windows: use BCryptGenRandom (CNG) */
+    if ( BCryptGenRandom( NULL,
+                          static_cast<PUCHAR>( dest ),
+                          static_cast<ULONG>( size ),
+                          BCRYPT_USE_SYSTEM_PREFERRED_RNG ) != 0 ) {
+      throw CryptoException( "BCryptGenRandom failed" );
+    }
+#elif defined( HAVE_GETRANDOM )
     if ( getrandom( dest, size, 0 ) != static_cast<ssize_t>( size ) ) {
       throw CryptoException( "getrandom fell short" );
     }

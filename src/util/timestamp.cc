@@ -32,10 +32,15 @@
 
 #include "src/include/config.h"
 
+#ifdef _WIN32
+#include "src/include/windows_compat.h"
+#endif
+
 #include "src/util/timestamp.h"
 
 #include <cerrno>
 
+#if !defined( _WIN32 )
 #if HAVE_CLOCK_GETTIME
 #include <ctime>
 #endif
@@ -47,6 +52,7 @@
 #include <cstdio>
 #include <sys/time.h>
 #endif
+#endif /* !_WIN32 */
 
 // On Apple systems CLOCK_MONOTONIC is unfortunately able to go
 // backwards in time. This breaks mosh when system is returning from
@@ -73,6 +79,23 @@ void freeze_timestamp( void )
 {
   // Try all our clock sources till we get something.  This could
   // break if a source only sometimes works in a given process.
+#ifdef _WIN32
+  /* Windows: use QueryPerformanceCounter for a high-resolution,
+     monotonic timer that survives system sleep/resume correctly. */
+  static LARGE_INTEGER frequency = { { 0, 0 } };
+  if ( frequency.QuadPart == 0 ) {
+    QueryPerformanceFrequency( &frequency );
+  }
+  LARGE_INTEGER counter;
+  if ( frequency.QuadPart > 0 && QueryPerformanceCounter( &counter ) ) {
+    /* Convert to milliseconds */
+    millis_cache = static_cast<uint64_t>( counter.QuadPart * 1000LL / frequency.QuadPart );
+    return;
+  }
+  /* Fallback: GetTickCount64 is monotonic but has lower resolution */
+  millis_cache = static_cast<uint64_t>( GetTickCount64() );
+  return;
+#else /* !_WIN32 */
 #if HAVE_CLOCK_GETTIME
   // Preferred clock source-- portable, monotonic, (should be)
   // adjusted after system sleep
@@ -90,7 +113,7 @@ void freeze_timestamp( void )
     millis_cache = millis;
     return;
   }
-#endif
+#endif /* HAVE_CLOCK_GETTIME */
 #if HAVE_MACH_ABSOLUTE_TIME
   // Monotonic, not adjusted after system sleep.  OS X 10.12 has
   // mach_continuous_time(), but also has clock_gettime().
@@ -110,7 +133,7 @@ void freeze_timestamp( void )
     millis_cache = mach_absolute_time() * absolute_to_millis;
     return;
   }
-#endif
+#endif /* HAVE_MACH_ABSOLUTE_TIME */
 #if HAVE_GETTIMEOFDAY
   // Not monotonic.
   // NOTE: If time steps backwards, timeouts may be confused.
@@ -126,5 +149,6 @@ void freeze_timestamp( void )
   }
 #else
 #error "gettimeofday() unavailable-- required as timer of last resort"
-#endif
+#endif /* HAVE_GETTIMEOFDAY */
+#endif /* !_WIN32 */
 }

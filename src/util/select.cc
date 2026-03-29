@@ -32,6 +32,14 @@
 
 #include "src/util/select.h"
 
+#ifdef _WIN32
+
+/* Windows: only the static verbose member needs a definition here.
+   Signal handling is done via SetConsoleCtrlHandler in select.h. */
+unsigned int Select::verbose = 0;
+
+#else /* !_WIN32 */
+
 fd_set Select::dummy_fd_set;
 
 sigset_t Select::dummy_sigset;
@@ -46,3 +54,5 @@ void Select::handle_signal( int signum )
   Select& sel = get_instance();
   sel.got_signal[signum] = 1;
 }
+
+#endif /* _WIN32 */
