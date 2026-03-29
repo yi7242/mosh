@@ -71,7 +71,7 @@ public:
 
 private:
   Select()
-    : sockets(), has_stdin( false ), stdin_ready( false ), consecutive_polls( 0 )
+    : sockets(), num_sockets( 0 ), has_stdin( false ), stdin_ready( false ), consecutive_polls( 0 )
   {
     memset( got_signal, 0, sizeof( got_signal ) );
     register_ctrl_handler();
@@ -87,7 +87,7 @@ private:
 
   /* sockets added via add_fd() */
   int sockets[MAX_SOCKETS];
-  int num_sockets = 0;
+  int num_sockets;
 
   bool has_stdin;
   bool stdin_ready;
@@ -161,12 +161,15 @@ public:
     if ( verbose > 1 && timeout == 0 ) {
       fprintf( stderr, "%s: got poll (timeout 0)\n", __func__ );
     }
-    if ( timeout == 0 && ++consecutive_polls >= MAX_POLLS ) {
-      if ( verbose > 1 && consecutive_polls == MAX_POLLS ) {
-        fprintf( stderr, "%s: got %d polls, rate limiting.\n", __func__, MAX_POLLS );
+    if ( timeout == 0 ) {
+      consecutive_polls++;
+      if ( consecutive_polls >= MAX_POLLS ) {
+        if ( verbose > 1 && consecutive_polls == MAX_POLLS ) {
+          fprintf( stderr, "%s: got %d polls, rate limiting.\n", __func__, MAX_POLLS );
+        }
+        timeout = 1;
       }
-      timeout = 1;
-    } else if ( timeout != 0 && consecutive_polls ) {
+    } else if ( consecutive_polls ) {
       if ( verbose > 1 && consecutive_polls >= MAX_POLLS ) {
         fprintf( stderr, "%s: got %d consecutive polls\n", __func__, consecutive_polls );
       }

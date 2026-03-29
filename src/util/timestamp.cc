@@ -82,7 +82,7 @@ void freeze_timestamp( void )
 #ifdef _WIN32
   /* Windows: use QueryPerformanceCounter for a high-resolution,
      monotonic timer that survives system sleep/resume correctly. */
-  static LARGE_INTEGER frequency = { { 0, 0 } };
+  static LARGE_INTEGER frequency = {};
   if ( frequency.QuadPart == 0 ) {
     QueryPerformanceFrequency( &frequency );
   }

@@ -329,7 +329,7 @@ void STMClient::main_init( void )
 #ifdef _WIN32
   /* Get initial window size using Windows Console API */
   if ( !windows_get_console_size( &window_rows, &window_cols ) ) {
-    fputs( "ioctl TIOCGWINSZ (GetConsoleScreenBufferInfo)\n", stderr );
+    fputs( "Failed to get console window size (GetConsoleScreenBufferInfo)\n", stderr );
     window_rows = 24;
     window_cols = 80;
   }
@@ -478,8 +478,8 @@ bool STMClient::process_user_input( int fd )
                stdout );
         fflush( NULL );
         /* Wait for any keypress, then re-enter raw mode */
-        int dummy = _getch();
-        (void)dummy;
+        int unused_keypress = _getch();
+        (void)unused_keypress;
         resume();
 #else
         if ( tcsetattr( STDIN_FILENO, TCSANOW, &saved_termios ) < 0 ) {
@@ -543,7 +543,7 @@ bool STMClient::process_resize( void )
   short new_rows = window_rows;
   short new_cols = window_cols;
   if ( !windows_get_console_size( &new_rows, &new_cols ) ) {
-    fputs( "GetConsoleScreenBufferInfo\n", stderr );
+    fputs( "Failed to get console size: GetConsoleScreenBufferInfo failed\n", stderr );
     return false;
   }
   window_rows = new_rows;

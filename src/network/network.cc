@@ -173,7 +173,7 @@ Connection::Socket::Socket( int family ) : _fd( socket( family, SOCK_DGRAM, 0 ) 
   u_long nonblocking = 1;
   if ( ioctlsocket( static_cast<SOCKET>( _fd ), FIONBIO, &nonblocking ) != 0 ) {
     wsa_set_errno();
-    throw NetworkException( "ioctlsocket FIONBIO", errno );
+    throw NetworkException( "Failed to set socket to non-blocking mode", errno );
   }
 #endif
 
@@ -654,23 +654,31 @@ Connection::Socket::~Socket()
 #endif
 }
 
-Connection::Socket::Socket( const Socket& other )
+namespace {
 #ifdef _WIN32
-  : _fd( -1 )
+static int duplicate_windows_socket_fd( int source_fd )
 {
-  /* Duplicate the Winsock socket handle */
   WSAPROTOCOL_INFOW proto_info;
-  if ( WSADuplicateSocketW( static_cast<SOCKET>( other._fd ), GetCurrentProcessId(), &proto_info ) != 0 ) {
+  if ( WSADuplicateSocketW( static_cast<SOCKET>( source_fd ), GetCurrentProcessId(), &proto_info ) != 0 ) {
     wsa_set_errno();
     throw NetworkException( "WSADuplicateSocket", errno );
   }
+
   SOCKET new_sock = WSASocketW( AF_UNSPEC, SOCK_DGRAM, 0, &proto_info, 0, WSA_FLAG_OVERLAPPED );
   if ( new_sock == INVALID_SOCKET ) {
     wsa_set_errno();
     throw NetworkException( "WSASocket (dup)", errno );
   }
-  _fd = static_cast<int>( new_sock );
+
+  return static_cast<int>( new_sock );
 }
+#endif
+} // namespace
+
+Connection::Socket::Socket( const Socket& other )
+#ifdef _WIN32
+  : _fd( duplicate_windows_socket_fd( other._fd ) )
+{}
 #else
   : _fd( dup( other._fd ) )
 {
@@ -684,18 +692,11 @@ Connection::Socket& Connection::Socket::operator=( const Socket& other )
 {
 #ifdef _WIN32
   if ( this != &other ) {
-    closesocket( static_cast<SOCKET>( _fd ) );
-    WSAPROTOCOL_INFOW proto_info;
-    if ( WSADuplicateSocketW( static_cast<SOCKET>( other._fd ), GetCurrentProcessId(), &proto_info ) != 0 ) {
+    if ( closesocket( static_cast<SOCKET>( _fd ) ) != 0 ) {
       wsa_set_errno();
-      throw NetworkException( "WSADuplicateSocket", errno );
+      throw NetworkException( "closesocket", errno );
     }
-    SOCKET new_sock = WSASocketW( AF_UNSPEC, SOCK_DGRAM, 0, &proto_info, 0, WSA_FLAG_OVERLAPPED );
-    if ( new_sock == INVALID_SOCKET ) {
-      wsa_set_errno();
-      throw NetworkException( "WSASocket (dup)", errno );
-    }
-    _fd = static_cast<int>( new_sock );
+    _fd = duplicate_windows_socket_fd( other._fd );
   }
   return *this;
 #else

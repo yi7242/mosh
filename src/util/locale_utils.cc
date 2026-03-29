@@ -87,7 +87,7 @@ const char* locale_charset( void )
   if ( cp == 20127 ) {
     return ascii_name;
   }
-  static char cp_name[16];
+  static thread_local char cp_name[16];
   snprintf( cp_name, sizeof cp_name, "CP%u", cp );
   return cp_name;
 #else
