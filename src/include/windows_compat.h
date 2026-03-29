@@ -63,7 +63,7 @@
 #define NOMINMAX
 #endif
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0A00 /* Windows 10 */
+#define _WIN32_WINNT 0x0A00 /* Windows 10+ API surface */
 #endif
 
 #include <winsock2.h>
@@ -184,8 +184,8 @@ inline void wsa_set_errno( void )
 #ifndef htobe64
 inline uint64_t htobe64( uint64_t x )
 {
-  return ( static_cast<uint64_t>( htonl( static_cast<uint32_t>( x >> 32 ) ) ) )
-         | ( static_cast<uint64_t>( htonl( static_cast<uint32_t>( x & 0xFFFFFFFFULL ) ) ) << 32 );
+  return ( static_cast<uint64_t>( htonl( static_cast<uint32_t>( x >> 32 ) ) ) << 32 )
+         | static_cast<uint64_t>( htonl( static_cast<uint32_t>( x & 0xFFFFFFFFULL ) ) );
 }
 #endif
 #ifndef be64toh

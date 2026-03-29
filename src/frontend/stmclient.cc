@@ -478,8 +478,7 @@ bool STMClient::process_user_input( int fd )
                stdout );
         fflush( NULL );
         /* Wait for any keypress, then re-enter raw mode */
-        int unused_keypress = _getch();
-        (void)unused_keypress;
+        (void)_getch();
         resume();
 #else
         if ( tcsetattr( STDIN_FILENO, TCSANOW, &saved_termios ) < 0 ) {

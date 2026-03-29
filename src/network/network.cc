@@ -664,7 +664,8 @@ static int duplicate_windows_socket_fd( int source_fd )
     throw NetworkException( "WSADuplicateSocket", errno );
   }
 
-  SOCKET new_sock = WSASocketW( AF_UNSPEC, SOCK_DGRAM, 0, &proto_info, 0, WSA_FLAG_OVERLAPPED );
+  SOCKET new_sock
+    = WSASocketW( proto_info.iAddressFamily, SOCK_DGRAM, 0, &proto_info, 0, WSA_FLAG_OVERLAPPED );
   if ( new_sock == INVALID_SOCKET ) {
     wsa_set_errno();
     throw NetworkException( "WSASocket (dup)", errno );
