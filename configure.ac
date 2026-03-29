@@ -26,6 +26,18 @@ m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
 # curve and require at least C++17.
 AX_CXX_COMPILE_STDCXX([17])
 
+# Detect Windows platform
+AC_CANONICAL_HOST
+case "${host_os}" in
+  *mingw* | *cygwin* | *msys*)
+    windows_build=yes
+    ;;
+  *)
+    windows_build=no
+    ;;
+esac
+AM_CONDITIONAL([WINDOWS], [test x"$windows_build" = x"yes"])
+
 WARNING_CXXFLAGS=""
 PICKY_CXXFLAGS=""
 DISTCHECK_CXXFLAGS=""
@@ -588,6 +600,7 @@ AC_CONFIG_FILES([
   src/fuzz/Makefile
   src/include/Makefile
   src/network/Makefile
+  src/platform/Makefile
   src/protobufs/Makefile
   src/statesync/Makefile
   src/terminal/Makefile

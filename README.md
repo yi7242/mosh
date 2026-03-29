@@ -63,6 +63,10 @@ Getting Mosh
   packages for many operating systems, as well as instructions for building
   from source.
 
+  **Windows Support**: Mosh now supports native Windows via Windows Terminal
+  and ConPTY. See [WINDOWS.md](WINDOWS.md) for Windows-specific build
+  instructions and requirements (Windows 10 1809 or later).
+
   Note that `mosh-client` receives an AES session key as an environment
   variable.  If you are porting Mosh to a new operating system, please make
   sure that a running process's environment variables are not readable by other
@@ -171,6 +175,11 @@ MacOS:
 ```
 $ brew install protobuf automake
 ```
+
+Windows (native):
+
+See [WINDOWS.md](WINDOWS.md) for detailed Windows build instructions using
+Visual Studio, MinGW-w64, or CMake.
 
 Once you have forked the repository, run the following to build and test Mosh:
 

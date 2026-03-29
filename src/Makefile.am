@@ -1,1 +1,1 @@
-SUBDIRS = include protobufs util crypto terminal network statesync frontend examples tests fuzz
+SUBDIRS = include protobufs platform util crypto terminal network statesync frontend examples tests fuzz
