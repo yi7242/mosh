@@ -1,0 +1,17 @@
+add_subdirectory(include)
+add_subdirectory(protobufs)
+add_subdirectory(platform)
+add_subdirectory(util)
+add_subdirectory(crypto)
+add_subdirectory(terminal)
+add_subdirectory(network)
+add_subdirectory(statesync)
+add_subdirectory(frontend)
+
+if(BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

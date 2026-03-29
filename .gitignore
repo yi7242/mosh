@@ -39,3 +39,34 @@ src/include/stamp-h1
 /VERSION.stamp
 /scripts/mosh
 src/include/version.h
+
+# CMake build artifacts
+/build/
+/build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+_deps/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.dir/
+.cmake/
+
+# Visual Studio
+.vs/
+out/
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Windows native build artifacts
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp

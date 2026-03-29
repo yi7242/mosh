@@ -183,12 +183,24 @@ Visual Studio, MinGW-w64, or CMake.
 
 Once you have forked the repository, run the following to build and test Mosh:
 
+**Using Autotools (Linux/macOS/Unix):**
+
 ```
 $ ./autogen.sh
 $ ./configure
 $ make
 $ make check
 ```
+
+**Using CMake (All platforms including Windows):**
+
+```
+$ cmake -B build -DCMAKE_BUILD_TYPE=Release
+$ cmake --build build
+$ cd build && ctest
+```
+
+See [CMAKE.md](CMAKE.md) for detailed CMake build instructions and options.
 
 Mosh supports producing code coverage reports by tests, but this feature is
 disabled by default. To enable it, make sure `lcov` is installed on your

@@ -92,19 +92,62 @@ Signal Mapping:
 
 ## Building on Windows
 
-### Option 1: Visual Studio (Recommended)
+### Option 1: Visual Studio with CMake (Recommended for Native Windows)
 
-1. Install Visual Studio 2019 or later with C++ workload
-2. Install dependencies via vcpkg:
+1. **Install Prerequisites:**
+   - Visual Studio 2019 or later with C++ workload
+   - CMake 3.15 or later (included with Visual Studio or download from cmake.org)
+   - vcpkg for dependency management
+
+2. **Install Dependencies via vcpkg:**
    ```cmd
-   vcpkg install openssl:x64-windows protobuf:x64-windows zlib:x64-windows
+   git clone https://github.com/Microsoft/vcpkg.git
+   cd vcpkg
+   .\bootstrap-vcpkg.bat
+   .\vcpkg integrate install
+   .\vcpkg install openssl:x64-windows protobuf:x64-windows zlib:x64-windows
    ```
 
-3. Generate Visual Studio solution files (requires CMake support - to be added)
+3. **Configure with CMake:**
+   ```cmd
+   mkdir build
+   cd build
+   cmake .. -G "Visual Studio 16 2019" -A x64 ^
+       -DCMAKE_TOOLCHAIN_FILE=C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake
+   ```
 
-4. Build using Visual Studio or MSBuild
+4. **Build:**
+   ```cmd
+   cmake --build . --config Release
+   ```
 
-### Option 2: MinGW-w64 with MSYS2
+   Or open `mosh.sln` in Visual Studio and build from the IDE.
+
+5. **Run:**
+   ```cmd
+   .\src\frontend\Release\mosh-client.exe
+   .\src\frontend\Release\mosh-server.exe
+   ```
+
+### Option 2: MinGW-w64 with CMake and MSYS2
+
+1. **Install MSYS2** from https://www.msys2.org/
+
+2. **Install build tools and dependencies:**
+   ```bash
+   pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake \
+             mingw-w64-x86_64-protobuf mingw-w64-x86_64-openssl \
+             mingw-w64-x86_64-zlib mingw-w64-x86_64-ninja
+   ```
+
+3. **Configure and build with CMake:**
+   ```bash
+   mkdir build && cd build
+   cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+   cmake --build .
+   ```
+
+### Option 3: MinGW-w64 with Autotools (Alternative)
 
 1. Install MSYS2 from https://www.msys2.org/
 
@@ -122,9 +165,15 @@ Signal Mapping:
    make
    ```
 
-### Option 3: CMake (Cross-platform)
+### Option 4: CMake with Ninja (Cross-platform, Fast)
 
-CMake build support is planned for easier cross-platform building.
+1. Install CMake and Ninja
+2. Install dependencies (via vcpkg or system package manager)
+3. Configure and build:
+   ```bash
+   cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+   cmake --build build
+   ```
 
 ## Architecture Notes
 
@@ -196,12 +245,13 @@ To test the Windows port:
 
 ## Future Enhancements
 
-1. **CMake Build System**: Add CMake support for easier Windows builds
-2. **Overlapped I/O**: Replace polling with asynchronous I/O for better performance
-3. **Native Window Events**: Use Console API events instead of polling for resize detection
-4. **MSI Installer**: Create Windows installer package
-5. **Windows Terminal Integration**: Add Windows Terminal-specific features
-6. **Chocolatey Package**: Distribute via Chocolatey package manager
+1. **Overlapped I/O**: Replace polling with asynchronous I/O for better performance
+2. **Native Window Events**: Use Console API events instead of polling for resize detection
+3. **MSI Installer**: Create Windows installer package
+4. **Windows Terminal Integration**: Add Windows Terminal-specific features
+5. **Chocolatey Package**: Distribute via Chocolatey package manager
+6. **Winget Package**: Add to Windows Package Manager
+7. **Performance Optimization**: Profile and optimize Windows-specific code paths
 
 ## Directory Structure
 
